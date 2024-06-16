@@ -11,16 +11,29 @@ class BuyAboveHigh(bt.Strategy):
     def __init__(self):
         self.ema = bt.indicators.ExponentialMovingAverage(self.data.close, period=self.params.ema_period)
         self.buy_signal = bt.indicators.CrossOver(self.data.close, self.ema)
+        self.buy_prices = []
+        self.sell_prices = []
 
     def next(self):
         if not self.position:
             if self.data.close[0] > self.data.high[-1] and self.data.high[-1] < self.ema[-1]:
-                stop_loss =  0.20* self.data.close[0]  #self.data.low[-1]
-                target = self.data.close[0] + 1 * self.data.close[0]  # Adjust target as needed
+                stop_loss = 0.20 * self.data.close[0]
+                target = 1 * self.data.close[0]  # Adjusted target calculation
                 
                 size = self.broker.get_cash() // self.data.close[0]
                 if size > 0:
-                    self.buy_bracket(price=self.data.close[0], stopprice=stop_loss, limitprice=target, size=size)
+                    self.buy(price=self.data.close[0], size=size)
+                    self.buy_prices.append(self.data.close[0])
+                    self.stop_loss = stop_loss
+                    self.target = target
+        else:
+            if self.data.close[0] >= self.buy_prices[-1] + self.target or self.data.close[0] <= self.buy_prices[-1] - self.stop_loss:
+                self.sell(price=self.data.close[0])
+                self.sell_prices.append(self.data.close[0])
+
+    def notify_trade(self, trade):
+        if trade.isclosed:
+            print(f'Closed: {trade.data._name}, Profit: {trade.pnl:.2f}, Buy Price: {self.buy_prices[-1]:.2f}, Sell Price: {self.sell_prices[-1]:.2f}')
 
 class MaxCashSizer(bt.Sizer):
     params = (
@@ -78,7 +91,8 @@ def main():
             continue
 
         # Generate report
-        trade_analysis = result[0].analyzers.trade.get_analysis()
+        strategy = result[0]
+        trade_analysis = strategy.analyzers.trade.get_analysis()
 
         trades = pd.DataFrame({
             'Ticker': [ticker],
@@ -86,6 +100,8 @@ def main():
             'Profitable Trades': [trade_analysis.won.total if 'won' in trade_analysis else 0],
             'Losing Trades': [trade_analysis.lost.total if 'lost' in trade_analysis else 0],
             'Total Profit/Loss': [trade_analysis.pnl.net.total if 'pnl' in trade_analysis and 'net' in trade_analysis.pnl else 0],
+            'Buy Prices': [strategy.buy_prices],
+            'Sell Prices': [strategy.sell_prices],
         })
 
         all_trades.append(trades)
