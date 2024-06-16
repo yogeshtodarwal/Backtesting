@@ -2,7 +2,6 @@ import backtrader as bt
 import yfinance as yf
 import pandas as pd
 import os
-import quantstats
 
 class BuyAboveHigh(bt.Strategy):
     params = (
@@ -12,24 +11,16 @@ class BuyAboveHigh(bt.Strategy):
     def __init__(self):
         self.ema = bt.indicators.ExponentialMovingAverage(self.data.close, period=self.params.ema_period)
         self.buy_signal = bt.indicators.CrossOver(self.data.close, self.ema)
-        self.order = None
 
     def next(self):
-        if self.order:  # Check if there is an open order
-            return
-
-        if not self.position:  # Check if there is no open position
+        if not self.position:
             if self.data.close[0] > self.data.high[-1] and self.data.high[-1] < self.ema[-1]:
-                stop_loss = self.data.close[0] * 0.80  # 20% below the current price
-                target = self.data.close[0] * 2  # 100% above the current price
-
+                stop_loss =  0.20* self.data.close[0]  #self.data.low[-1]
+                target = self.data.close[0] + 1 * self.data.close[0]  # Adjust target as needed
+                
                 size = self.broker.get_cash() // self.data.close[0]
                 if size > 0:
-                    self.order = self.buy_bracket(price=self.data.close[0], stopprice=stop_loss, limitprice=target, size=size)
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
+                    self.buy_bracket(price=self.data.close[0], stopprice=stop_loss, limitprice=target, size=size)
 
 class MaxCashSizer(bt.Sizer):
     params = (
@@ -73,12 +64,11 @@ def main():
         cerebro = bt.Cerebro()
         cerebro.addstrategy(BuyAboveHigh)
         cerebro.adddata(data)
-        cerebro.broker.set_cash(1000000)  # Initial cash, adjust as needed
+        cerebro.broker.set_cash(100000)  # Initial cash, adjust as needed
         cerebro.addsizer(MaxCashSizer)  # Use the custom sizer
 
         # Add trade analyzer
         cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trade')
-        cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
 
         # Run the strategy
         try:
@@ -99,12 +89,6 @@ def main():
         })
 
         all_trades.append(trades)
-
-        # Use QuantStats to generate a detailed report
-        pyfoliozer = result[0].analyzers.getbyname('pyfolio')
-        returns, positions, transactions, gross_lev = pyfoliozer.get_pf_items()
-        returns.index = returns.index.tz_convert(None)  # Remove timezone information
-        quantstats.reports.html(returns, output=f'{ticker}_report.html', title=f'{ticker} Strategy Performance Report')
 
     # Concatenate all trades into a single DataFrame
     if all_trades:
