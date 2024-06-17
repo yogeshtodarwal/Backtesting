@@ -3,9 +3,11 @@ import yfinance as yf
 import pandas as pd
 import os
 
+EMA_PERIOD = 5
+
 class BuyAboveHigh(bt.Strategy):
     params = (
-        ('ema_period', 5),
+        ('ema_period', EMA_PERIOD),
     )
 
     def __init__(self):
@@ -20,8 +22,8 @@ class BuyAboveHigh(bt.Strategy):
     def next(self):
         if not self.position:
             if self.data.close[0] > self.data.high[-1] and self.data.high[-1] < self.ema[-1]:
-                stop_loss = 0.80 * self.data.close[0]
-                target = 2 * self.data.close[0]  # Adjusted target calculation
+                stop_loss = 0.75 * self.data.close[0]
+                target = 3 * self.data.close[0]  # Adjusted target calculation
 
                 size = self.broker.get_cash() // self.data.close[0]
                 size = min(size, 30000 // self.data.close[0])  # Ensure size is within max_cash constraint
@@ -68,8 +70,8 @@ def fetch_data(ticker, start_date, end_date):
     return df
 
 def main():
-    start_date = '2010-01-01'
-    end_date = '2023-01-01'
+    start_date = '2024-01-01'
+    end_date = '2024-06-14'
     
     # Read stock tickers from CSV file
     equity_file = 'equity_full.csv'
@@ -84,7 +86,7 @@ def main():
             print(f"No data for {ticker}. Skipping.")
             continue
 
-        if len(df) < 5:  # Check if there's enough data for EMA calculation
+        if len(df) < EMA_PERIOD:  # Check if there's enough data for EMA calculation
             print(f"Not enough data for {ticker}. Skipping.")
             continue
 

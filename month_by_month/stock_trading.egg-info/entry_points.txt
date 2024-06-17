@@ -1,0 +1,3 @@
+[console_scripts]
+stock_trading = stock_trading.main:main
+
