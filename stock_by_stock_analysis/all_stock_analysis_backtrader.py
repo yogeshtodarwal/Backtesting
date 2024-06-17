@@ -5,6 +5,7 @@ import os
 
 EMA_PERIOD = 5
 e_name = 'equity_full.csv'
+market_cap_threshold = 5000000000  # Market cap threshold in USD
 
 class BuyAboveHigh(bt.Strategy):
     params = (
@@ -24,7 +25,7 @@ class BuyAboveHigh(bt.Strategy):
         if not self.position:
             if self.data.close[0] > self.data.high[-1] and self.data.high[-1] < self.ema[-1]:
                 stop_loss = 0.75 * self.data.close[0]
-                target = 3 * self.data.close[0]  # Adjusted target calculation
+                target = 2 * self.data.close[0]  # Adjusted target calculation
 
                 size = self.broker.get_cash() // self.data.close[0]
                 size = min(size, 30000 // self.data.close[0])  # Ensure size is within max_cash constraint
@@ -73,6 +74,18 @@ def fetch_data(ticker, start_date, end_date):
     df = yf.download(ticker, start=start_date, end=end_date, interval='1mo')
     return df
 
+def get_market_cap(ticker):
+    try:
+        ticker_info = yf.Ticker(ticker).info
+        if ticker_info and 'marketCap' in ticker_info and ticker_info['marketCap'] is not None:
+            return ticker_info['marketCap']
+        else:
+            print(f"Market cap information not available for {ticker}")
+            return None
+    except Exception as e:
+        print(f"Error fetching market cap for {ticker}: {e}")
+        return None
+
 def main():
     start_date = '2005-01-01'
     end_date = '2024-06-14'
@@ -86,6 +99,12 @@ def main():
 
     for ticker in stocks:
         print(f'Analyzing {ticker}...')
+        # Check market capitalization
+        market_cap = get_market_cap(f'{ticker}.NS')  # Adjust suffix according to your data source
+        if market_cap is None or market_cap < market_cap_threshold:
+            print(f"Skipping {ticker} due to low market cap or missing data.")
+            continue
+        
         df = fetch_data(f'{ticker}.NS', start_date, end_date)
         if df.empty:
             print(f"No data for {ticker}. Skipping.")
