@@ -4,6 +4,7 @@ import pandas as pd
 import os
 
 EMA_PERIOD = 5
+e_name = 'equity_full.csv'
 
 class BuyAboveHigh(bt.Strategy):
     params = (
@@ -28,16 +29,16 @@ class BuyAboveHigh(bt.Strategy):
                 size = self.broker.get_cash() // self.data.close[0]
                 size = min(size, 30000 // self.data.close[0])  # Ensure size is within max_cash constraint
                 if size > 0:
-                    print(f"Buying {size} shares at {self.data.close[0]} for a total of {size * self.data.close[0]}")
+                    print(f"Buying {size} shares of {self.data._name} at {self.data.close[0]} for a total of {size * self.data.close[0]}")
                     self.buy(price=self.data.close[0], size=size)
-                    self.buy_prices.append(self.data.close[0])
+                    self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
                     self.stop_loss = stop_loss
                     self.target = target
         else:
             if self.data.close[0] >= self.target or self.data.close[0] <= self.stop_loss:
-                print(f"Selling {self.position.size} shares at {self.data.close[0]}")
+                print(f"Selling {self.position.size} shares of {self.data._name} at {self.data.close[0]}")
                 self.sell(price=self.data.close[0])
-                self.sell_prices.append(self.data.close[0])
+                self.sell_prices.append((self.data.datetime.date(0), self.data.close[0]))
                 self.stop_loss = None
                 self.target = None
 
@@ -45,12 +46,15 @@ class BuyAboveHigh(bt.Strategy):
         if trade.isclosed:
             trade_info = {
                 'ticker': trade.data._name,
-                'buy_price': int(round(self.buy_prices[-1])) if self.buy_prices else None,
-                'sell_price': int(round(self.sell_prices[-1])) if self.sell_prices else None,
-                'profit': int(round(trade.pnl))
+                'buy_date': self.buy_prices[-1][0] if self.buy_prices else None,
+                'buy_price': self.buy_prices[-1][1] if self.buy_prices else None,
+                'sell_date': self.sell_prices[-1][0] if self.sell_prices else None,
+                'sell_price': self.sell_prices[-1][1] if self.sell_prices else None,
+                'profit': trade.pnl,
+                'profit_percent': (trade.pnl / trade.price) * 100
             }
             self.trades.append(trade_info)
-            print(f'Closed: {trade.data._name}, Profit: {trade.pnl:.2f}, Buy Price: {self.buy_prices[-1]:.2f}, Sell Price: {self.sell_prices[-1]:.2f}')
+            print(f'Closed: {trade.data._name}, Profit: {trade.pnl:.2f}, Buy Price: {trade_info["buy_price"]:.2f}, Sell Price: {trade_info["sell_price"]:.2f}')
 
 class MaxCashSizer(bt.Sizer):
     params = (
@@ -70,14 +74,15 @@ def fetch_data(ticker, start_date, end_date):
     return df
 
 def main():
-    start_date = '2024-01-01'
+    start_date = '2005-01-01'
     end_date = '2024-06-14'
     
     # Read stock tickers from CSV file
-    equity_file = 'equity_full.csv'
+    equity_file = e_name
     stocks = pd.read_csv(equity_file)['Ticker'].tolist()
 
     all_trades = []
+    completed_trades = []
 
     for ticker in stocks:
         print(f'Analyzing {ticker}...')
@@ -121,9 +126,12 @@ def main():
                 'Profitable Trades': [trade_analysis.won.total if 'won' in trade_analysis else 0],
                 'Losing Trades': [trade_analysis.lost.total if 'lost' in trade_analysis else 0],
                 'Total Profit/Loss': [int(round(trade_analysis.pnl.net.total)) if 'pnl' in trade_analysis and 'net' in trade_analysis.pnl else 0],
+                'Profit Percentage': [round((trade_analysis.pnl.net.total / 100000) * 100, 2) if 'pnl' in trade_analysis and 'net' in trade_analysis.pnl else 0],
                 'Buy Prices': [', '.join(map(str, trades['buy_price'].dropna().tolist()))],
                 'Sell Prices': [', '.join(map(str, trades['sell_price'].dropna().tolist()))],
             })
+
+            completed_trades.append(trades)
         else:
             trade_summary = pd.DataFrame({
                 'Ticker': [ticker],
@@ -131,6 +139,7 @@ def main():
                 'Profitable Trades': [0],
                 'Losing Trades': [0],
                 'Total Profit/Loss': [0],
+                'Profit Percentage': [0],
                 'Buy Prices': [''],
                 'Sell Prices': [''],
             })
@@ -144,6 +153,14 @@ def main():
         print("All trades report saved to all_trades_report.csv")
     else:
         print("No trades to report.")
+
+    # Save completed trades report
+    if completed_trades:
+        completed_trades_df = pd.concat(completed_trades, ignore_index=True)
+        completed_trades_df.to_csv('completed_trades_report.csv', index=False)
+        print("Completed trades report saved to completed_trades_report.csv")
+    else:
+        print("No completed trades to report.")
 
 if __name__ == '__main__':
     main()
