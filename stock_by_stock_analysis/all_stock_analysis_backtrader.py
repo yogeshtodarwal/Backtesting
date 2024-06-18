@@ -5,7 +5,7 @@ import os
 
 EMA_PERIOD = 5
 e_name = 'equity_full.csv'
-market_cap_threshold = 5000000000  # Market cap threshold in USD
+market_cap_threshold = 20000000000  # 2000 cr Market cap threshold in USD
 
 class BuyAboveHigh(bt.Strategy):
     params = (
@@ -25,7 +25,7 @@ class BuyAboveHigh(bt.Strategy):
         if not self.position:
             if self.data.close[0] > self.data.high[-1] and self.data.high[-1] < self.ema[-1]:
                 stop_loss = 0.75 * self.data.close[0]
-                target = 2 * self.data.close[0]  # Adjusted target calculation
+                target = 0.5 * self.data.close[0]  # Adjusted target calculation
 
                 size = self.broker.get_cash() // self.data.close[0]
                 size = min(size, 30000 // self.data.close[0])  # Ensure size is within max_cash constraint
