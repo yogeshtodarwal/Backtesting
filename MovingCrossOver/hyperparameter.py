@@ -2,7 +2,7 @@ import backtrader as bt
 import yfinance as yf
 import pandas as pd
 import itertools
-import os
+import numpy as np
 
 class MovingAverageCrossover(bt.Strategy):
     params = (
@@ -25,12 +25,10 @@ class MovingAverageCrossover(bt.Strategy):
                 size = self.broker.get_cash() // self.data.close[0]
                 size = min(size, 30000 // self.data.close[0])
                 if size > 0:
-                    print(f"Buying {size} shares of {self.data._name} at {self.data.close[0]} for a total of {size * self.data.close[0]}")
                     self.buy(price=self.data.close[0], size=size)
                     self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
         else:
             if self.crossover < 0:  # Fast MA crosses below Slow MA
-                print(f"Selling {self.position.size} shares of {self.data._name} at {self.data.close[0]}")
                 self.sell(price=self.data.close[0])
                 self.sell_prices.append((self.data.datetime.date(0), self.data.close[0]))
 
@@ -43,10 +41,9 @@ class MovingAverageCrossover(bt.Strategy):
                 'sell_date': self.sell_prices[-1][0] if self.sell_prices else None,
                 'sell_price': self.sell_prices[-1][1] if self.sell_prices else None,
                 'profit': trade.pnl,
-                'profit_percent': (trade.pnl / trade.price) * 100
+                'profit_percent': (trade.pnl / trade.price) * 100 if trade.price else 0
             }
             self.trades.append(trade_info)
-            print(f'Closed: {trade.data._name}, Profit: {trade.pnl:.2f}, Buy Price: {trade_info["buy_price"]:.2f}, Sell Price: {trade_info["sell_price"]:.2f}')
 
 class MaxCashSizer(bt.Sizer):
     params = (
@@ -57,7 +54,6 @@ class MaxCashSizer(bt.Sizer):
         if isbuy:
             available_cash = min(self.params.max_cash, cash)
             size = available_cash // data.close[0]
-            print(f"Calculating size: available_cash = {available_cash}, data.close[0] = {data.close[0]}, size = {size}")
             return size
         return self.broker.getposition(data).size
 
@@ -71,21 +67,18 @@ def get_market_cap(ticker):
         if ticker_info and 'marketCap' in ticker_info and ticker_info['marketCap'] is not None:
             return ticker_info['marketCap']
         else:
-            print(f"Market cap information not available for {ticker}")
             return None
     except Exception as e:
-        print(f"Error fetching market cap for {ticker}: {e}")
         return None
 
 def main():
     start_date = '2005-01-01'
     end_date = '2024-06-14'
     
-    equity_file = 'equity_full.csv'
+    equity_file = '../equity_full.csv'
     stocks = pd.read_csv(equity_file)['Ticker'].tolist()
 
     all_trades = []
-    completed_trades = []
 
     # Hyperparameter grid
     fast_periods = [10, 15, 20]
@@ -128,54 +121,49 @@ def main():
                 continue
 
             strategy = result[0]
-            trade_analysis = strategy.analyzers.trade.get_analysis()
-
             trades = pd.DataFrame(strategy.trades)
 
             if not trades.empty:
-                trade_summary = pd.DataFrame({
-                    'Ticker': [ticker],
-                    'Fast Period': [fast_period],
-                    'Slow Period': [slow_period],
-                    'Total Trades': [trade_analysis.total.closed if 'total' in trade_analysis and 'closed' in trade_analysis.total else 0],
-                    'Profitable Trades': [trade_analysis.won.total if 'won' in trade_analysis else 0],
-                    'Losing Trades': [trade_analysis.lost.total if 'lost' in trade_analysis else 0],
-                    'Total Profit/Loss': [int(round(trade_analysis.pnl.net.total)) if 'pnl' in trade_analysis and 'net' in trade_analysis.pnl else 0],
-                    'Profit Percentage': [round((trade_analysis.pnl.net.total / 100000) * 100, 2) if 'pnl' in trade_analysis and 'net' in trade_analysis.pnl else 0],
-                    'Buy Prices': [', '.join(map(str, trades['buy_price'].dropna().tolist()))],
-                    'Sell Prices': [', '.join(map(str, trades['sell_price'].dropna().tolist()))],
-                })
-
-                completed_trades.append(trades)
-            else:
-                trade_summary = pd.DataFrame({
-                    'Ticker': [ticker],
-                    'Fast Period': [fast_period],
-                    'Slow Period': [slow_period],
-                    'Total Trades': [0],
-                    'Profitable Trades': [0],
-                    'Losing Trades': [0],
-                    'Total Profit/Loss': [0],
-                    'Profit Percentage': [0],
-                    'Buy Prices': [''],
-                    'Sell Prices': [''],
-                })
-
-            all_trades.append(trade_summary)
+                trades['Ticker'] = ticker
+                trades['Fast Period'] = fast_period
+                trades['Slow Period'] = slow_period
+                all_trades.append(trades)
 
     if all_trades:
         all_trades_df = pd.concat(all_trades, ignore_index=True)
-        all_trades_df.to_csv('all_trades_report.csv', index=False)
-        print("All trades report saved to all_trades_report.csv")
+        all_trades_df.to_csv('all_trades_detailed.csv', index=False)
+        
+        # Summary statistics
+        total_trades = len(all_trades_df)
+        total_profit = all_trades_df['profit'].sum()
+        average_profit_per_trade = all_trades_df['profit'].mean()
+        median_profit_per_trade = all_trades_df['profit'].median()
+        successful_trades = all_trades_df[all_trades_df['profit'] > 0]
+        success_probability_per_trade = len(successful_trades) / total_trades if total_trades > 0 else 0
+
+        stock_group = all_trades_df.groupby('Ticker')['profit'].sum().reset_index()
+        average_profit_per_stock = stock_group['profit'].mean()
+        median_profit_per_stock = stock_group['profit'].median()
+        successful_stocks = stock_group[stock_group['profit'] > 0]
+        success_probability_per_stock = len(successful_stocks) / len(stock_group) if len(stock_group) > 0 else 0
+
+        summary = {
+            'Total Trades': total_trades,
+            'Total Stocks': len(stock_group),
+            'Total Profit': total_profit,
+            'Average Profit per Trade': average_profit_per_trade,
+            'Median Profit per Trade': median_profit_per_trade,
+            'Success Probability per Trade': success_probability_per_trade,
+            'Average Profit per Stock': average_profit_per_stock,
+            'Median Profit per Stock': median_profit_per_stock,
+            'Success Probability per Stock': success_probability_per_stock,
+        }
+
+        summary_df = pd.DataFrame([summary])
+        summary_df.to_csv('trading_summary.csv', index=False)
+        print("Trading summary saved to trading_summary.csv")
     else:
         print("No trades to report.")
-
-    if completed_trades:
-        completed_trades_df = pd.concat(completed_trades, ignore_index=True)
-        completed_trades_df.to_csv('completed_trades_report.csv', index=False)
-        print("Completed trades report saved to completed_trades_report.csv")
-    else:
-        print("No completed trades to report.")
 
 if __name__ == '__main__':
     main()
