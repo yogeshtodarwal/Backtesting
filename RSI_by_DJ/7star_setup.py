@@ -25,13 +25,14 @@ class BuyWithRSIAndMovingAverages(bt.Strategy):
     def next(self):
         if not self.position:
             if self.rsi[0] > 60 and self.buy_signal[0] == 1:
-                size = self.broker.get_cash() // self.data.close[0]
-                size = min(size, 30000 // self.data.close[0])
-                if size > 0:
-                    print(f"Buying {size} shares of {self.data._name} at {self.data.close[0]} for a total of {size * self.data.close[0]}")
-                    self.buy(price=self.data.close[0], size=size)
-                    self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
-                    self.stop_loss = 0.75 * self.data.close[0]  # Set a stop-loss value if required
+                if not self.current_price_in_previous_candle(self.data.close[0]):
+                    size = self.broker.get_cash() // self.data.close[0]
+                    size = min(size, 30000 // self.data.close[0])
+                    if size > 0:
+                        print(f"Buying {size} shares of {self.data._name} at {self.data.close[0]} for a total of {size * self.data.close[0]}")
+                        self.buy(price=self.data.close[0], size=size)
+                        self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
+                        self.stop_loss = 0.75 * self.data.close[0]  # Set a stop-loss value if required
         else:
             if self.data.close[0] < self.ma2[0]:
                 print(f"Selling {self.position.size} shares of {self.data._name} at {self.data.close[0]}")
@@ -39,6 +40,13 @@ class BuyWithRSIAndMovingAverages(bt.Strategy):
                 self.sell_prices.append((self.data.datetime.date(0), self.data.close[0]))
                 self.stop_loss = None
                 self.target = None
+
+    def current_price_in_previous_candle(self, current_price):
+        if len(self.data) > 1:
+            previous_high = self.data.high[-1]
+            previous_low = self.data.low[-1]
+            return previous_low <= current_price <= previous_high
+        return False
 
     def notify_trade(self, trade):
         if trade.isclosed:
@@ -159,14 +167,14 @@ def main():
 
     if all_trades:
         all_trades_df = pd.concat(all_trades, ignore_index=True)
-        all_trades_df.to_csv('all_trades_report.csv', index=False)
+        all_trades_df.to_csv('7S_all_trades_report.csv', index=False)
         print("All trades report saved to all_trades_report.csv")
     else:
         print("No trades to report.")
 
     if completed_trades:
         completed_trades_df = pd.concat(completed_trades, ignore_index=True)
-        completed_trades_df.to_csv('completed_trades_report.csv', index=False)
+        completed_trades_df.to_csv('7S_completed_trades_report.csv', index=False)
         print("Completed trades report saved to completed_trades_report.csv")
     else:
         print("No completed trades to report.")
