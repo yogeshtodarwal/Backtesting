@@ -81,8 +81,8 @@ def main():
     all_trades = []
 
     # Hyperparameter grid
-    fast_periods = [10, 15, 20]
-    slow_periods = [30, 35, 40]
+    fast_periods = [5, 7, 10, 13, 15, 20, 23, 25]   
+    slow_periods = [30, 33, 35, 37, 40, 43, 45, 47, 50, 52]      
     hyperparams = list(itertools.product(fast_periods, slow_periods))
 
     for ticker in stocks:
@@ -167,3 +167,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+#What is total profit, mean, meadian, min, max profit corresponding to specific 9 combinations of 3 slow and 3 fast moving averages. Just to see which works best. Also calculate percentage of trade profitability which is total profitable trades divide by toal trades
