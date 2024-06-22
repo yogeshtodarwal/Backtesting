@@ -1,36 +1,52 @@
 import backtrader as bt
 import yfinance as yf
 import pandas as pd
-import itertools
-import numpy as np
 
-class MovingAverageCrossover(bt.Strategy):
+class ConsolidationBreakout(bt.Strategy):
     params = (
-        ('fast_period', 10),
-        ('slow_period', 30),
+        ('consolidation_period', 3),  # Consolidation period in months
+        ('target_pct', 100),          # Target percentage of the closing price on breakout
     )
 
     def __init__(self):
-        self.fast_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.fast_period)
-        self.slow_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.slow_period)
-        self.crossover = bt.indicators.CrossOver(self.fast_ma, self.slow_ma)
-
         self.buy_prices = []
         self.sell_prices = []
         self.trades = []
 
     def next(self):
         if not self.position:
-            if self.crossover > 0:  # Fast MA crosses above Slow MA
-                size = self.broker.get_cash() // self.data.close[0]
-                size = min(size, 30000 // self.data.close[0])
-                if size > 0:
-                    self.buy(price=self.data.close[0], size=size)
-                    self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
+            if self.is_consolidating():
+                consolidation_period_days = self.params.consolidation_period * 22
+                self.consolidation_low = min(self.data.close.get(size=consolidation_period_days))
+                self.consolidation_high = max(self.data.close.get(size=consolidation_period_days))
+                if self.data.close[0] > self.consolidation_high:  # Breakout condition
+                    size = self.broker.get_cash() // self.data.close[0]
+                    size = min(size, 30000 // self.data.close[0])
+                    if size > 0:
+                        self.buy(price=self.data.close[0], size=size)
+                        self.buy_prices.append((self.data.datetime.date(0), self.data.close[0]))
+                        self.target_price = self.data.close[0] * (1 + self.params.target_pct / 100)
+                        self.stop_price = self.consolidation_low
         else:
-            if self.crossover < 0:  # Fast MA crosses below Slow MA
+            if self.data.close[0] >= self.target_price or self.data.close[0] <= self.stop_price:
                 self.sell(price=self.data.close[0])
                 self.sell_prices.append((self.data.datetime.date(0), self.data.close[0]))
+
+    def is_consolidating(self):
+        closes = self.data.close.get(size=self.params.consolidation_period * 22)
+        if len(closes) < self.params.consolidation_period * 22:
+            return False
+
+        max_close = max(closes)
+        min_close = min(closes)
+        current_high = self.data.high[0]
+        current_low = self.data.low[0]
+
+        is_in_range = current_high < max_close and current_low > min_close
+
+        return is_in_range and all(
+            closes[i] <= max_close and closes[i] >= min_close for i in range(len(closes))
+        )
 
     def notify_trade(self, trade):
         if trade.isclosed:
@@ -59,6 +75,7 @@ class MaxCashSizer(bt.Sizer):
 
 def fetch_data(ticker, start_date, end_date):
     df = yf.download(ticker, start=start_date, end=end_date, interval='1mo')
+    df.rename(columns={'Adj Close': 'close'}, inplace=True)  # Ensure compatibility with Backtrader
     return df
 
 def get_market_cap(ticker):
@@ -72,23 +89,18 @@ def get_market_cap(ticker):
         return None
 
 def main():
-    start_date = '2000-01-01'
-    end_date = '2024-06-19'
+    start_date = '2005-01-01'
+    end_date = '2024-06-14'
     
-    equity_file = '../equity_full.csv'
+    equity_file = '../equity.csv'
     stocks = pd.read_csv(equity_file)['Ticker'].tolist()
 
     all_trades = []
 
-    # Hyperparameter grid
-    fast_periods = [25] #[5, 7, 10, 13, 15, 20, 23, 25]   
-    slow_periods = [30] #[30, 33, 35, 37, 40, 43, 45, 47, 50, 52]      
-    hyperparams = list(itertools.product(fast_periods, slow_periods))
-
     for ticker in stocks:
         print(f'Analyzing {ticker}...')
         market_cap = get_market_cap(f'{ticker}.NS')
-        if market_cap is None or market_cap < 2000000000: #2000 crore
+        if market_cap is None or market_cap < 2000000000:  # 2000 crore
             print(f"Skipping {ticker} due to low market cap or missing data.")
             continue
         
@@ -97,41 +109,32 @@ def main():
             print(f"No data for {ticker}. Skipping.")
             continue
 
-        if len(df) < max(fast_periods + slow_periods):
-            print(f"Not enough data for {ticker}. Skipping.")
+        data = bt.feeds.PandasData(dataname=df)
+
+        cerebro = bt.Cerebro()
+        cerebro.addstrategy(ConsolidationBreakout)
+        cerebro.adddata(data)
+        cerebro.broker.set_cash(100000)
+        cerebro.addsizer(MaxCashSizer)
+
+        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trade')
+
+        try:
+            result = cerebro.run()
+        except Exception as e:
+            print(f"Error running strategy for {ticker}: {e}")
             continue
 
-        for fast_period, slow_period in hyperparams:
-            print(f"Testing {ticker} with fast_period={fast_period} and slow_period={slow_period}")
-            
-            data = bt.feeds.PandasData(dataname=df)
+        strategy = result[0]
+        trades = pd.DataFrame(strategy.trades)
 
-            cerebro = bt.Cerebro()
-            cerebro.addstrategy(MovingAverageCrossover, fast_period=fast_period, slow_period=slow_period)
-            cerebro.adddata(data)
-            cerebro.broker.set_cash(100000)
-            cerebro.addsizer(MaxCashSizer)
-
-            cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trade')
-
-            try:
-                result = cerebro.run()
-            except Exception as e:
-                print(f"Error running strategy for {ticker}: {e}")
-                continue
-
-            strategy = result[0]
-            trades = pd.DataFrame(strategy.trades)
-
-            if not trades.empty:
-                trades['Ticker'] = ticker
-                trades['Fast Period'] = fast_period
-                trades['Slow Period'] = slow_period
-                all_trades.append(trades)
+        if not trades.empty:
+            trades['Ticker'] = ticker
+            all_trades.append(trades)
 
     if all_trades:
         all_trades_df = pd.concat(all_trades, ignore_index=True)
-        all_trades_df.to_csv('25_30_all_trades_detailed.csv', index=False)
+        all_trades_df.to_csv('all_trades_detailed.csv', index=False)
         
         # Summary statistics
         total_trades = len(all_trades_df)
@@ -160,12 +163,10 @@ def main():
         }
 
         summary_df = pd.DataFrame([summary])
-        summary_df.to_csv('25_30_trading_summary.csv', index=False)
+        summary_df.to_csv('trading_summary.csv', index=False)
         print("Trading summary saved to trading_summary.csv")
     else:
         print("No trades to report.")
 
 if __name__ == '__main__':
     main()
-
-#What is total profit, mean, meadian, min, max profit corresponding to specific 9 combinations of 3 slow and 3 fast moving averages. Just to see which works best. Also calculate percentage of trade profitability which is total profitable trades divide by toal trades
